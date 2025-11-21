@@ -1,7 +1,7 @@
 import { Cloud } from 'lucide-react';
 import { useLocations } from './hooks/useLocations';
 import { LocationInput } from './components/LocationInput';
-import { WeatherCard } from './components/WeatherCard';
+import { WeatherGrid } from './components/WeatherGrid';
 
 function App() {
   const { locations, addLocation, removeLocation, canAddMore } = useLocations();
@@ -28,7 +28,7 @@ function App() {
         {/* Location Input */}
         <LocationInput onAddLocation={addLocation} canAddMore={canAddMore} />
 
-        {/* Weather Cards */}
+        {/* Weather Grid */}
         {locations.length === 0 ? (
           <div className="text-center py-16">
             <Cloud className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
@@ -38,14 +38,8 @@ function App() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {locations.map((location, index) => (
-              <WeatherCard
-                key={`${location.latitude}-${location.longitude}`}
-                location={location}
-                onRemove={() => removeLocation(index)}
-              />
-            ))}
+          <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
+            <WeatherGrid locations={locations} onRemoveLocation={removeLocation} />
           </div>
         )}
       </main>
