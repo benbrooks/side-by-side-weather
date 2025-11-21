@@ -25,7 +25,7 @@ const STATE_ABBREVIATIONS = {
 /**
  * Expand state abbreviations in a query string
  * @param {string} query - Search query
- * @returns {string} Query with expanded state names
+ * @returns {Object} { query: expanded query, isUS: whether a US state was detected }
  */
 function expandStateAbbreviation(query) {
   // Match patterns like "Boulder, CO" or "Boulder CO"
@@ -35,11 +35,11 @@ function expandStateAbbreviation(query) {
     const lastPart = parts[parts.length - 1].toUpperCase();
     if (STATE_ABBREVIATIONS[lastPart]) {
       parts[parts.length - 1] = STATE_ABBREVIATIONS[lastPart];
-      return parts.join(' ');
+      return { query: parts.join(' '), isUS: true };
     }
   }
 
-  return query;
+  return { query, isUS: false };
 }
 
 /**
@@ -52,8 +52,10 @@ export async function searchLocation(query) {
     throw new Error('Query cannot be empty');
   }
 
-  // Expand state abbreviations
-  const expandedQuery = expandStateAbbreviation(query.trim());
+  const trimmedQuery = query.trim();
+  const { query: expandedQuery, isUS } = expandStateAbbreviation(trimmedQuery);
+
+  console.log('Search query:', trimmedQuery, '-> Expanded:', expandedQuery, 'isUS:', isUS);
 
   try {
     const url = new URL(GEOCODING_API);
@@ -74,17 +76,27 @@ export async function searchLocation(query) {
       return [];
     }
 
-    // Format results
-    return data.results.map(result => ({
+    // Format and filter results
+    let results = data.results.map(result => ({
       id: result.id,
       name: result.name,
       latitude: result.latitude,
       longitude: result.longitude,
       country: result.country,
+      countryCode: result.country_code,
       admin1: result.admin1, // State/Region
       timezone: result.timezone,
       displayName: formatDisplayName(result),
     }));
+
+    // If a US state was detected, prioritize US results
+    if (isUS) {
+      const usResults = results.filter(r => r.countryCode === 'US');
+      const otherResults = results.filter(r => r.countryCode !== 'US');
+      results = [...usResults, ...otherResults];
+    }
+
+    return results;
   } catch (error) {
     console.error('Geocoding error:', error);
     throw error;

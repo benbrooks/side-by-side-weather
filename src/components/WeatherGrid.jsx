@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, AlertCircle } from 'lucide-react';
-import { getWeatherForecast } from '../services/weather';
+import { X, Loader2, AlertCircle, Thermometer, ThermometerSnowflake, ThermometerSun } from 'lucide-react';
+import { getWeatherForecast, getWeatherInfo } from '../services/weather';
 import { WeatherIcon } from './WeatherIcon';
 
 export function WeatherGrid({ locations, onRemoveLocation }) {
@@ -79,21 +79,26 @@ export function WeatherGrid({ locations, onRemoveLocation }) {
     }
   };
 
+  // Check if date is in any of the date windows
   const isDateInRange = (dateString, location) => {
-    if (!location.startDate && !location.endDate) return true;
+    const dateWindows = location.dateWindows || [];
+    if (dateWindows.length === 0) return true;
 
     const date = new Date(dateString);
-    const start = location.startDate ? new Date(location.startDate) : null;
-    const end = location.endDate ? new Date(location.endDate) : null;
 
-    if (start && end) {
-      return date >= start && date <= end;
-    } else if (start) {
-      return date >= start;
-    } else if (end) {
-      return date <= end;
-    }
-    return true;
+    return dateWindows.some(window => {
+      const start = window.startDate ? new Date(window.startDate) : null;
+      const end = window.endDate ? new Date(window.endDate) : null;
+
+      if (start && end) {
+        return date >= start && date <= end;
+      } else if (start) {
+        return date >= start;
+      } else if (end) {
+        return date <= end;
+      }
+      return false;
+    });
   };
 
   const getDayData = (location, dateString) => {
@@ -101,6 +106,60 @@ export function WeatherGrid({ locations, onRemoveLocation }) {
     const data = weatherData[key];
     if (!data?.daily) return null;
     return data.daily.find(day => day.date === dateString);
+  };
+
+  // Calculate overview stats for a location (only for active date windows)
+  const getOverviewStats = (location) => {
+    const key = `${location.latitude}-${location.longitude}`;
+    const data = weatherData[key];
+    if (!data?.daily) return null;
+
+    const dateWindows = location.dateWindows || [];
+    const relevantDays = dateWindows.length > 0
+      ? data.daily.filter(day => isDateInRange(day.date, location))
+      : data.daily;
+
+    if (relevantDays.length === 0) return null;
+
+    const temps = relevantDays.flatMap(day => [day.temperatureMax, day.temperatureMin]);
+    const coldest = Math.min(...temps);
+    const warmest = Math.max(...temps);
+
+    // Get unique weather conditions
+    const conditions = new Map();
+    relevantDays.forEach(day => {
+      const info = getWeatherInfo(day.weatherCode);
+      if (!conditions.has(info.description)) {
+        conditions.set(info.description, { code: day.weatherCode, count: 1 });
+      } else {
+        conditions.get(info.description).count++;
+      }
+    });
+
+    // Sort by frequency
+    const sortedConditions = Array.from(conditions.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 3);
+
+    return { coldest, warmest, conditions: sortedConditions };
+  };
+
+  // Format date windows for display
+  const formatDateWindows = (location) => {
+    const dateWindows = location.dateWindows || [];
+    if (dateWindows.length === 0) return null;
+
+    return dateWindows.map((window, index) => {
+      const parts = [];
+      if (window.startDate) {
+        parts.push(new Date(window.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+      }
+      if (window.endDate) {
+        if (window.startDate) parts.push(' - ');
+        parts.push(new Date(window.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+      }
+      return parts.join('');
+    }).filter(Boolean);
   };
 
   const dates = getAllDates();
@@ -119,35 +178,94 @@ export function WeatherGrid({ locations, onRemoveLocation }) {
             <th className="sticky left-0 bg-muted p-3 text-left font-semibold text-foreground border-b border-border min-w-[100px]">
               Date
             </th>
-            {locations.map((location, index) => (
-              <th
-                key={`${location.latitude}-${location.longitude}`}
-                className="bg-muted p-3 text-left border-b border-border min-w-[200px]"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="font-semibold text-foreground">{location.name}</div>
-                    <div className="text-xs text-muted-foreground font-normal">
-                      {location.admin1 && `${location.admin1}, `}{location.country}
-                    </div>
-                    {(location.startDate || location.endDate) && (
-                      <div className="text-xs text-primary font-normal mt-1">
-                        {location.startDate && new Date(location.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        {location.startDate && location.endDate && ' - '}
-                        {location.endDate && new Date(location.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            {locations.map((location, index) => {
+              const dateWindowsDisplay = formatDateWindows(location);
+              return (
+                <th
+                  key={`${location.latitude}-${location.longitude}`}
+                  className="bg-muted p-3 text-left border-b border-border min-w-[220px]"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-foreground">{location.name}</div>
+                      <div className="text-xs text-muted-foreground font-normal">
+                        {location.admin1 && `${location.admin1}, `}{location.country}
                       </div>
-                    )}
+                      {dateWindowsDisplay && dateWindowsDisplay.length > 0 && (
+                        <div className="text-xs text-primary font-normal mt-1">
+                          {dateWindowsDisplay.map((range, i) => (
+                            <span key={i}>
+                              {i > 0 && ' | '}
+                              {range}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => onRemoveLocation(index)}
+                      className="p-1 hover:bg-accent rounded-md transition-colors flex-shrink-0"
+                      title="Remove location"
+                    >
+                      <X className="w-4 h-4 text-muted-foreground hover:text-foreground" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => onRemoveLocation(index)}
-                    className="p-1 hover:bg-accent rounded-md transition-colors flex-shrink-0"
-                    title="Remove location"
-                  >
-                    <X className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-                  </button>
-                </div>
-              </th>
-            ))}
+                </th>
+              );
+            })}
+          </tr>
+
+          {/* Overview summary row */}
+          <tr className="bg-secondary/50">
+            <td className="sticky left-0 bg-secondary/50 p-3 border-b border-border">
+              <div className="font-semibold text-foreground text-sm">Overview</div>
+              <div className="text-xs text-muted-foreground">Trip summary</div>
+            </td>
+            {locations.map((location) => {
+              const key = `${location.latitude}-${location.longitude}`;
+              const stats = getOverviewStats(location);
+              const isLoadingLoc = loading[key];
+
+              return (
+                <td key={key} className="p-3 border-b border-border">
+                  {isLoadingLoc && (
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  )}
+                  {!isLoadingLoc && stats && (
+                    <div className="space-y-2">
+                      {/* Temperature range */}
+                      <div className="flex items-center gap-3 text-sm">
+                        <div className="flex items-center gap-1">
+                          <ThermometerSnowflake className="w-4 h-4 text-blue-500" />
+                          <span className="text-blue-600 font-medium">{stats.coldest}°</span>
+                        </div>
+                        <span className="text-muted-foreground">to</span>
+                        <div className="flex items-center gap-1">
+                          <ThermometerSun className="w-4 h-4 text-orange-500" />
+                          <span className="text-orange-600 font-medium">{stats.warmest}°</span>
+                        </div>
+                      </div>
+                      {/* Weather conditions */}
+                      <div className="flex flex-wrap gap-1">
+                        {stats.conditions.map(([desc, data], i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-1 px-2 py-1 bg-background rounded-full text-xs"
+                            title={desc}
+                          >
+                            <WeatherIcon weatherCode={data.code} className="w-4 h-4" />
+                            <span className="text-muted-foreground">{desc}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!isLoadingLoc && !stats && (
+                    <span className="text-xs text-muted-foreground">No data</span>
+                  )}
+                </td>
+              );
+            })}
           </tr>
         </thead>
 
